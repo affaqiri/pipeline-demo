@@ -1,0 +1,21 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Service template for infra resources
+
+Parameters:
+  Env:
+    Description: "Environment tag, e.g. production, integration, staging, team."
+    Type: String
+    AllowedValues:
+      - team
+      - staging
+      - integration
+      - production
+    Default: team
+
+Resources:
+  ApplicationLoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP/HTTPS requests to the health check service ALB
+      VpcId: "123"

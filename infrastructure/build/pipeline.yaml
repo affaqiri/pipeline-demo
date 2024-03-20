@@ -1,0 +1,174 @@
+Resources:
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: "sts:AssumeRole"
+      Path: /
+      Policies:
+        - PolicyName: codestar
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "codestar-connections:UseConnection"
+                Resource: "arn:aws:codestar-connections:ap-southeast-2:891377070216:connection/3a67d42a-f3c1-4f33-9ffc-b9080ff879bb"
+        - PolicyName: codebuild
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "codebuild:*"
+                Resource: "*"
+        - PolicyName: logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:*"
+                Resource: "*"
+        - PolicyName: s3
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:*"
+                Resource: "*"
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: "sts:AssumeRole"
+      Path: /
+      Policies:
+        - PolicyName: logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:*"
+                Resource: "*"
+        - PolicyName: s3
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:*"
+                Resource: "*"
+        - PolicyName: codestar
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "codestar-connections:UseConnection"
+                Resource: "arn:aws:codestar-connections:ap-southeast-2:891377070216:connection/3a67d42a-f3c1-4f33-9ffc-b9080ff879bb"
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: ApplicationSource
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: "1"
+              OutputArtifacts:
+                - Name: GitHubSource
+              Configuration:
+                BranchName: "master"
+                ConnectionArn: "arn:aws:codestar-connections:ap-southeast-2:891377070216:connection/3a67d42a-f3c1-4f33-9ffc-b9080ff879bb"
+                DetectChanges: "true"
+                FullRepositoryId: "affaqiri/argocd-example-apps"
+                OutputArtifactFormat: "CODEBUILD_CLONE_REF"
+              RunOrder: 1
+        - Name: CodeBuild
+          Actions:
+            - Name: CodeBuild
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              Configuration:
+                ProjectName: !Ref BuildProject
+              InputArtifacts:
+                - Name: GitHubSource
+              OutputArtifacts:
+                - Name: BuildArtifact
+              RunOrder: 1
+            - Name: CreateChangeSet
+              RunOrder: 2
+              InputArtifacts:
+                - Name: BuildArtifact
+              ActionTypeId:
+                Category: Deploy
+                Provider: CloudFormation
+                Owner: AWS
+                Version: "1"
+              Configuration:
+                ActionMode: CHANGE_SET_REPLACE
+                Capabilities: CAPABILITY_AUTO_EXPAND,CAPABILITY_NAMED_IAM
+                ChangeSetName: "my-changeset"
+                StackName: "stack-name"
+                TemplatePath: BuildArtifact::main.yaml
+
+      ArtifactStore:
+        Type: S3
+        Location: "afa-my-website-source"
+
+  BuildProjectLogGroup:
+    #Condition: IsDeployingInfra
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain # This LogGroup will not be deleted during the deletion of the stack so that build logs will last for RetentionInDays below
+    Properties:
+      #LogGroupName: !Join ["", ["/aws/codebuild/", "-shared-build"]]
+      RetentionInDays: 14
+
+  BuildProject:
+    #Condition: IsDeployingInfra
+    #DependsOn: BuildProjectSharedLogGroup
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: "build-step"
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: infrastructure/build/buildspec.build.yaml
+      LogsConfig:
+        CloudWatchLogs:
+          GroupName: !Ref BuildProjectLogGroup
+          Status: ENABLED
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Type: LINUX_CONTAINER
+        Image: aws/codebuild/standard:5.0
+        PrivilegedMode: true
+        # These can be accessed inside the BuildSpec: <file> above
+        EnvironmentVariables:
+          - Name: ARTIFACT_BUCKET
+            Value: "test"
+      ServiceRole: !GetAtt CodeBuildRole.Arn # create specific role for build
+      #EncryptionKey: !Ref ArtifactBucketKeyArn

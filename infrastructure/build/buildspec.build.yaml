@@ -1,0 +1,20 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 14
+    commands:
+      - echo "install"
+  pre_build:
+    on-failure: ABORT
+    commands:
+      - echo "pre build"
+  build:
+    commands:
+      - echo "build"
+
+artifacts:
+  discard-paths: yes
+  files:
+    - infrastructure/main.yaml
